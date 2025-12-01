@@ -33,12 +33,15 @@ FONT_BOLD = ("SF Pro Display", 13, "bold")
 FONT_HEADER = ("SF Pro Display", 26, "bold")
 FONT_TITLE = ("SF Pro Display", 14, "bold")
 FONT_ICON = ("SF Pro Display", 18, "bold")
+FONT_TIMER = ("SF Pro Display", 60, "bold") 
 
+# Global Vars
 db = None
 tasks_table = None
 checked_task_ids = set()
 filter_var = None  
 filter_menu = None 
+hide_completed_var = None 
 
 # --- 3. HELPER FUNCTIONS ---
 
@@ -53,12 +56,9 @@ def center_window_to_parent(window, width, height):
     window.geometry(f"{width}x{height}+{x_pos}+{y_pos}")
 
 def get_priority(impact, is_urgent):
-    if impact == "High": 
-        return "Critical" if is_urgent else "Planned"
-    elif impact == "Medium": 
-        return "Important" if is_urgent else "Review"
-    else: 
-        return "Delegate" if is_urgent else "Trivial"
+    if impact == "High": return "Critical" if is_urgent else "Planned"
+    elif impact == "Medium": return "Important" if is_urgent else "Review"
+    else: return "Delegate" if is_urgent else "Trivial"
 
 def get_all_categories():
     if tasks_table is None: return ["All Categories"]
@@ -67,7 +67,109 @@ def get_all_categories():
     sorted_cats = sorted(list(cats))
     return ["All Categories"] + sorted_cats
 
-# --- 4. DATABASE & SETUP LOGIC ---
+# --- 4. POMODORO LOGIC (UPDATED: CENTERED) ---
+
+class PomodoroWindow(ctk.CTkToplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Focus Mode")
+        
+        # --- CENTERING LOGIC ---
+        width = 300
+        height = 250
+        
+        # Ensure parent geometry is up to date
+        parent.update_idletasks()
+        
+        main_x = parent.winfo_x()
+        main_y = parent.winfo_y()
+        main_w = parent.winfo_width()
+        main_h = parent.winfo_height()
+        
+        x_pos = main_x + (main_w // 2) - (width // 2)
+        y_pos = main_y + (main_h // 2) - (height // 2)
+        
+        self.geometry(f"{width}x{height}+{x_pos}+{y_pos}")
+        self.attributes("-topmost", True) 
+
+        self.time_left = 25 * 60 
+        self.running = False
+        self.timer_id = None
+        self.mode = "Work" 
+
+        # UI
+        self.lbl_mode = ctk.CTkLabel(self, text="🔥 Focus Time", font=FONT_TITLE, text_color="#FF3B30")
+        self.lbl_mode.pack(pady=(20, 5))
+
+        self.lbl_timer = ctk.CTkLabel(self, text="25:00", font=FONT_TIMER)
+        self.lbl_timer.pack(pady=10)
+
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.pack(pady=10)
+
+        self.btn_start = ctk.CTkButton(btn_frame, text="Start", width=80, command=self.toggle_timer, fg_color="#34C759", hover_color="#28a745")
+        self.btn_start.pack(side="left", padx=5)
+
+        self.btn_reset = ctk.CTkButton(btn_frame, text="Reset", width=80, command=self.reset_timer, fg_color="#FF3B30", hover_color="#d32f2f")
+        self.btn_reset.pack(side="left", padx=5)
+
+        self.btn_mode = ctk.CTkButton(self, text="Switch to Break (5m)", command=self.switch_mode, fg_color="transparent", border_width=1, text_color="white")
+        self.btn_mode.pack(pady=10)
+
+    def toggle_timer(self):
+        if self.running:
+            self.running = False
+            self.btn_start.configure(text="Resume", fg_color="#34C759")
+            if self.timer_id:
+                self.after_cancel(self.timer_id)
+        else:
+            self.running = True
+            self.btn_start.configure(text="Pause", fg_color="#FFCC00", text_color="black")
+            self.countdown()
+
+    def countdown(self):
+        if self.running and self.time_left > 0:
+            mins, secs = divmod(self.time_left, 60)
+            self.lbl_timer.configure(text=f"{mins:02d}:{secs:02d}")
+            self.time_left -= 1
+            self.timer_id = self.after(1000, self.countdown)
+        elif self.time_left == 0:
+            self.running = False
+            self.lbl_timer.configure(text="00:00")
+            self.btn_start.configure(text="Start", fg_color="#34C759")
+            tk.messagebox.showinfo("Timer", f"{self.mode} finished!", parent=self)
+
+    def reset_timer(self):
+        self.running = False
+        if self.timer_id: self.after_cancel(self.timer_id)
+        self.btn_start.configure(text="Start", fg_color="#34C759")
+        
+        if self.mode == "Work":
+            self.time_left = 25 * 60
+            self.lbl_timer.configure(text="25:00")
+        else:
+            self.time_left = 5 * 60
+            self.lbl_timer.configure(text="05:00")
+
+    def switch_mode(self):
+        self.reset_timer()
+        if self.mode == "Work":
+            self.mode = "Break"
+            self.lbl_mode.configure(text="☕️ Take a Break", text_color="#34C759")
+            self.btn_mode.configure(text="Switch to Focus (25m)")
+            self.time_left = 5 * 60
+            self.lbl_timer.configure(text="05:00")
+        else:
+            self.mode = "Work"
+            self.lbl_mode.configure(text="🔥 Focus Time", text_color="#FF3B30")
+            self.btn_mode.configure(text="Switch to Break (5m)")
+            self.time_left = 25 * 60
+            self.lbl_timer.configure(text="25:00")
+
+def open_pomodoro():
+    PomodoroWindow(app)
+
+# --- 5. DATABASE & SETUP ---
 
 def initialize_db(path):
     global db, tasks_table
@@ -130,7 +232,7 @@ def check_config_on_startup():
             pass 
     open_setup_wizard()
 
-# --- 5. CORE UI LOGIC ---
+# --- 6. CORE UI LOGIC ---
 
 def update_filter_options():
     if filter_menu is None: return
@@ -148,9 +250,14 @@ def refresh_task_list(event=None):
 
     all_tasks = tasks_table.all()
     
+    # 1. Category Filter
     current_filter = filter_var.get()
     if current_filter != "All Categories":
         all_tasks = [t for t in all_tasks if t.get('category', 'General') == current_filter]
+
+    # 2. Hide Completed Filter
+    if hide_completed_var.get(): 
+        all_tasks = [t for t in all_tasks if t.get('status') != 'Completed']
 
     # Sort Logic
     priority_order = {"Critical": 0, "Important": 1, "Planned": 2, "Review": 3, "Delegate": 4, "Trivial": 5}
@@ -208,7 +315,7 @@ def toggle_check(event):
         tree.item(row_id, values=current_vals)
         return "break" 
 
-# --- 6. POPUP WINDOWS ---
+# --- 7. POPUP WINDOWS ---
 
 def open_calendar_picker(parent_window, set_date_callback):
     cal_win = ctk.CTkToplevel(parent_window)
@@ -233,7 +340,6 @@ def open_task_window(task_id=None, task_data=None):
     is_edit = task_id is not None
     win = ctk.CTkToplevel(app)
     win.title("Edit Task" if is_edit else "Add New Task")
-    # Increased height to fit Status field
     center_window_to_parent(win, 420, 580) 
     win.grab_set() 
     win.attributes("-topmost", True)
@@ -246,7 +352,7 @@ def open_task_window(task_id=None, task_data=None):
         category = combo_category.get() 
         is_urgent = switch_urgent.get() == 1
         deadline = date_var.get()
-        status = combo_status.get() # Get Status
+        status = combo_status.get() 
 
         if not title: return
         if not category.strip(): category = "General"
@@ -255,7 +361,7 @@ def open_task_window(task_id=None, task_data=None):
         record = {
             'title': title, 'impact': impact, 'category': category, 
             'is_urgent': is_urgent, 'priority': calculated_priority, 'deadline': deadline,
-            'status': status, # Save Status
+            'status': status,
             'created_at': datetime.datetime.now().strftime("%Y-%m-%d") if not is_edit else task_data['created_at']
         }
 
@@ -287,7 +393,7 @@ def open_task_window(task_id=None, task_data=None):
     combo_category.set("General") 
     combo_category.pack(fill="x", padx=15, pady=(0, 10))
 
-    # 3. Status (NEW FIELD)
+    # 3. Status
     ctk.CTkLabel(frame, text="Status", font=FONT_TITLE, text_color="#A0A0A0").pack(anchor="w", padx=15, pady=(0,5))
     combo_status = ctk.CTkComboBox(frame, values=["Pending", "In Progress", "Completed", "On Hold"], state="readonly", font=FONT_MAIN, height=35)
     combo_status.set("Pending")
@@ -311,12 +417,11 @@ def open_task_window(task_id=None, task_data=None):
     ctk.CTkButton(date_frame, text="Select", width=80, 
                   command=lambda: open_calendar_picker(win, lambda d: date_var.set(d))).pack(side="right")
 
-    # Pre-fill data
     if is_edit and task_data:
         entry_title.insert(0, task_data['title'])
         combo_impact.set(task_data['impact'])
         combo_category.set(task_data.get('category', 'General'))
-        combo_status.set(task_data.get('status', 'Pending')) # Set Status
+        combo_status.set(task_data.get('status', 'Pending'))
         if task_data.get('is_urgent', False): switch_urgent.select()
         date_var.set(task_data['deadline'])
 
@@ -330,7 +435,7 @@ def on_double_click(event):
     task_data = tasks_table.get(doc_id=doc_id)
     if task_data: open_task_window(task_id=doc_id, task_data=task_data)
 
-# --- 7. MAIN APP RENDER ---
+# --- 8. MAIN APP RENDER ---
 app = ctk.CTk()
 app.title("TaskMaster")
 app.geometry("950x650") 
@@ -339,22 +444,40 @@ app.geometry("950x650")
 header_frame = ctk.CTkFrame(app, height=70, corner_radius=0, fg_color="transparent")
 header_frame.pack(fill="x", padx=30, pady=(30, 20))
 
-ctk.CTkLabel(header_frame, text="Tasks", font=FONT_HEADER).pack(side="left")
+top_row = ctk.CTkFrame(header_frame, fg_color="transparent")
+top_row.pack(fill="x")
+ctk.CTkLabel(top_row, text="Tasks", font=FONT_HEADER).pack(side="left")
 
-# Filter
+btn_focus = ctk.CTkButton(top_row, text="Focus Mode 🍅", width=120, height=32, 
+                          command=open_pomodoro, fg_color="#34C759", hover_color="#28a745", font=FONT_BOLD)
+btn_focus.pack(side="right", padx=(0,0))
+
+bottom_row = ctk.CTkFrame(header_frame, fg_color="transparent")
+bottom_row.pack(fill="x", pady=(15,0))
+
 filter_var = tk.StringVar(value="All Categories")
 filter_menu = ctk.CTkComboBox(
-    header_frame, 
+    bottom_row, 
     values=["All Categories"], 
     command=refresh_task_list, 
     variable=filter_var,
     width=150,
     font=FONT_MAIN
 )
-filter_menu.pack(side="left", padx=(20, 0))
+filter_menu.pack(side="left")
 
-# Buttons
-btn_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+hide_completed_var = ctk.BooleanVar(value=True) 
+switch_hide = ctk.CTkSwitch(
+    bottom_row, 
+    text="Hide Completed", 
+    command=refresh_task_list, 
+    variable=hide_completed_var,
+    onvalue=True, offvalue=False,
+    font=FONT_MAIN
+)
+switch_hide.pack(side="left", padx=20)
+
+btn_frame = ctk.CTkFrame(bottom_row, fg_color="transparent")
 btn_frame.pack(side="right")
 btn_del = ctk.CTkButton(btn_frame, text="-", width=40, height=40, corner_radius=10,
     font=FONT_ICON, fg_color="#FF3B30", hover_color="#D70015", command=delete_selected_tasks)
@@ -363,7 +486,6 @@ btn_add = ctk.CTkButton(btn_frame, text="+", width=40, height=40, corner_radius=
     font=FONT_ICON, fg_color="#007AFF", hover_color="#0062cc", command=lambda: open_task_window())
 btn_add.pack(side="left")
 
-# List Area
 list_frame = ctk.CTkFrame(app, corner_radius=12)
 list_frame.pack(fill="both", expand=True, padx=30, pady=(0, 30))
 

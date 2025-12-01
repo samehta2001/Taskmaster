@@ -1,0 +1,82 @@
+('/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+ 'Coding/ToDoer/TaskMaster/build/TaskMaster/TaskMaster',
+ False,
+ False,
+ True,
+ ['/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+  'Coding/ToDoer/TaskMaster/app_icon.icns'],
+ None,
+ False,
+ False,
+ None,
+ True,
+ False,
+ 'arm64',
+ None,
+ None,
+ '/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+ 'Coding/ToDoer/TaskMaster/build/TaskMaster/TaskMaster.pkg',
+ [('pyi-contents-directory _internal', '', 'OPTION'),
+  ('PYZ-00.pyz',
+   '/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+   'Coding/ToDoer/TaskMaster/build/TaskMaster/PYZ-00.pyz',
+   'PYZ'),
+  ('python3.14/lib-dynload/_struct.cpython-314-darwin.so',
+   '/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/lib-dynload/_struct.cpython-314-darwin.so',
+   'EXTENSION'),
+  ('python3.14/lib-dynload/zlib.cpython-314-darwin.so',
+   '/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/lib-dynload/zlib.cpython-314-darwin.so',
+   'EXTENSION'),
+  ('struct',
+   '/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+   'Coding/ToDoer/TaskMaster/build/TaskMaster/localpycs/struct.pyc',
+   'PYMODULE'),
+  ('pyimod01_archive',
+   '/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+   'Coding/ToDoer/TaskMaster/build/TaskMaster/localpycs/pyimod01_archive.pyc',
+   'PYMODULE'),
+  ('pyimod02_importers',
+   '/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+   'Coding/ToDoer/TaskMaster/build/TaskMaster/localpycs/pyimod02_importers.pyc',
+   'PYMODULE'),
+  ('pyimod03_ctypes',
+   '/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+   'Coding/ToDoer/TaskMaster/build/TaskMaster/localpycs/pyimod03_ctypes.pyc',
+   'PYMODULE'),
+  ('pyiboot01_bootstrap',
+   '/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+   'Coding/ToDoer/venv/lib/python3.14/site-packages/PyInstaller/loader/pyiboot01_bootstrap.py',
+   'PYSOURCE'),
+  ('pyi_rth_inspect',
+   '/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+   'Coding/ToDoer/venv/lib/python3.14/site-packages/PyInstaller/hooks/rthooks/pyi_rth_inspect.py',
+   'PYSOURCE'),
+  ('pyi_rth_setuptools',
+   '/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+   'Coding/ToDoer/venv/lib/python3.14/site-packages/PyInstaller/hooks/rthooks/pyi_rth_setuptools.py',
+   'PYSOURCE'),
+  ('pyi_rth_pkgutil',
+   '/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+   'Coding/ToDoer/venv/lib/python3.14/site-packages/PyInstaller/hooks/rthooks/pyi_rth_pkgutil.py',
+   'PYSOURCE'),
+  ('pyi_rth_multiprocessing',
+   '/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+   'Coding/ToDoer/venv/lib/python3.14/site-packages/PyInstaller/hooks/rthooks/pyi_rth_multiprocessing.py',
+   'PYSOURCE'),
+  ('pyi_rth__tkinter',
+   '/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+   'Coding/ToDoer/venv/lib/python3.14/site-packages/PyInstaller/hooks/rthooks/pyi_rth__tkinter.py',
+   'PYSOURCE'),
+  ('taskmaster',
+   '/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+   'Coding/ToDoer/TaskMaster/taskmaster.py',
+   'PYSOURCE')],
+ [],
+ False,
+ False,
+ 1764589503,
+ [('runw',
+   '/Users/sameer.mehta/Library/CloudStorage/OneDrive-RelianceCorporateITParkLimited/Projects/AI '
+   'Coding/ToDoer/venv/lib/python3.14/site-packages/PyInstaller/bootloader/Darwin-64bit/runw',
+   'EXECUTABLE')],
+ '/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/Python')
