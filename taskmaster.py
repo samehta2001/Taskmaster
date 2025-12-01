@@ -9,10 +9,7 @@ import json
 import sys
 import platform
 
-# --- 1. PATH CONFIGURATION (Mac App Fix) ---
-# This ensures we save data in the User's "Application Support" folder.
-# If we don't do this, the compiled .app will fail to save settings.
-
+# --- 1. PATH CONFIGURATION ---
 APP_NAME = "TaskMaster"
 
 if platform.system() == "Darwin":
@@ -22,7 +19,6 @@ elif platform.system() == "Windows":
 else:
     USER_DATA_DIR = os.path.join(os.path.expanduser("~"), ".local", "share", APP_NAME)
 
-# Create the directory if it doesn't exist
 if not os.path.exists(USER_DATA_DIR):
     os.makedirs(USER_DATA_DIR)
 
@@ -32,14 +28,12 @@ CONFIG_FILE = os.path.join(USER_DATA_DIR, 'todo_config.json')
 ctk.set_appearance_mode("Dark") 
 ctk.set_default_color_theme("blue") 
 
-# Fonts
 FONT_MAIN = ("SF Pro Display", 13)
 FONT_BOLD = ("SF Pro Display", 13, "bold")
 FONT_HEADER = ("SF Pro Display", 26, "bold")
 FONT_TITLE = ("SF Pro Display", 14, "bold")
 FONT_ICON = ("SF Pro Display", 18, "bold")
 
-# Global Variables
 db = None
 tasks_table = None
 checked_task_ids = set()
@@ -49,7 +43,6 @@ filter_menu = None
 # --- 3. HELPER FUNCTIONS ---
 
 def center_window_to_parent(window, width, height):
-    """Centers a child window relative to the main app."""
     app.update_idletasks()
     main_x = app.winfo_x()
     main_y = app.winfo_y()
@@ -60,7 +53,6 @@ def center_window_to_parent(window, width, height):
     window.geometry(f"{width}x{height}+{x_pos}+{y_pos}")
 
 def get_priority(impact, is_urgent):
-    """Eisenhower Matrix Logic."""
     if impact == "High": 
         return "Critical" if is_urgent else "Planned"
     elif impact == "Medium": 
@@ -69,7 +61,6 @@ def get_priority(impact, is_urgent):
         return "Delegate" if is_urgent else "Trivial"
 
 def get_all_categories():
-    """Returns list of unique categories found in DB."""
     if tasks_table is None: return ["All Categories"]
     cats = set(task.get('category', 'General') for task in tasks_table.all())
     cats.add("General") 
@@ -94,7 +85,6 @@ def save_config_and_start(path):
     initialize_db(path)
 
 def open_setup_wizard():
-    """First Run Modal Window."""
     setup_win = ctk.CTkToplevel(app)
     setup_win.title("Welcome")
     center_window_to_parent(setup_win, 400, 250)
@@ -158,12 +148,11 @@ def refresh_task_list(event=None):
 
     all_tasks = tasks_table.all()
     
-    # Filter
     current_filter = filter_var.get()
     if current_filter != "All Categories":
         all_tasks = [t for t in all_tasks if t.get('category', 'General') == current_filter]
 
-    # Sort
+    # Sort Logic
     priority_order = {"Critical": 0, "Important": 1, "Planned": 2, "Review": 3, "Delegate": 4, "Trivial": 5}
     all_tasks.sort(key=lambda x: priority_order.get(x['priority'], 99))
 
@@ -178,7 +167,7 @@ def refresh_task_list(event=None):
             task['title'], 
             cat_display,
             task['priority'], 
-            task['status'], 
+            task.get('status', 'Pending'), 
             task['deadline']
         ), tags=(tag,))
         count += 1
@@ -244,7 +233,8 @@ def open_task_window(task_id=None, task_data=None):
     is_edit = task_id is not None
     win = ctk.CTkToplevel(app)
     win.title("Edit Task" if is_edit else "Add New Task")
-    center_window_to_parent(win, 420, 500) 
+    # Increased height to fit Status field
+    center_window_to_parent(win, 420, 580) 
     win.grab_set() 
     win.attributes("-topmost", True)
     
@@ -256,6 +246,7 @@ def open_task_window(task_id=None, task_data=None):
         category = combo_category.get() 
         is_urgent = switch_urgent.get() == 1
         deadline = date_var.get()
+        status = combo_status.get() # Get Status
 
         if not title: return
         if not category.strip(): category = "General"
@@ -264,7 +255,7 @@ def open_task_window(task_id=None, task_data=None):
         record = {
             'title': title, 'impact': impact, 'category': category, 
             'is_urgent': is_urgent, 'priority': calculated_priority, 'deadline': deadline,
-            'status': 'Pending' if not is_edit else task_data['status'],
+            'status': status, # Save Status
             'created_at': datetime.datetime.now().strftime("%Y-%m-%d") if not is_edit else task_data['created_at']
         }
 
@@ -280,11 +271,12 @@ def open_task_window(task_id=None, task_data=None):
     frame = ctk.CTkFrame(win, corner_radius=15)
     frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-    # Inputs
-    ctk.CTkLabel(frame, text="Task Description", font=FONT_TITLE, text_color="#A0A0A0").pack(anchor="w", padx=15, pady=(10,5))
+    # 1. Title
+    ctk.CTkLabel(frame, text="Task Description", font=FONT_TITLE, text_color="#A0A0A0").pack(anchor="w", padx=15, pady=(5,5))
     entry_title = ctk.CTkEntry(frame, placeholder_text="Details...", font=FONT_MAIN, height=35)
     entry_title.pack(fill="x", padx=15, pady=(0, 10))
 
+    # 2. Category
     ctk.CTkLabel(frame, text="Category", font=FONT_TITLE, text_color="#A0A0A0").pack(anchor="w", padx=15, pady=(0,5))
     existing_cats = get_all_categories()
     if "All Categories" in existing_cats: existing_cats.remove("All Categories")
@@ -295,25 +287,36 @@ def open_task_window(task_id=None, task_data=None):
     combo_category.set("General") 
     combo_category.pack(fill="x", padx=15, pady=(0, 10))
 
+    # 3. Status (NEW FIELD)
+    ctk.CTkLabel(frame, text="Status", font=FONT_TITLE, text_color="#A0A0A0").pack(anchor="w", padx=15, pady=(0,5))
+    combo_status = ctk.CTkComboBox(frame, values=["Pending", "In Progress", "Completed", "On Hold"], state="readonly", font=FONT_MAIN, height=35)
+    combo_status.set("Pending")
+    combo_status.pack(fill="x", padx=15, pady=(0, 10))
+
+    # 4. Impact
     ctk.CTkLabel(frame, text="Impact", font=FONT_TITLE, text_color="#A0A0A0").pack(anchor="w", padx=15, pady=(0,5))
     combo_impact = ctk.CTkComboBox(frame, values=["High", "Medium", "Low"], state="readonly", font=FONT_MAIN, height=35)
     combo_impact.set("High")
     combo_impact.pack(fill="x", padx=15, pady=(0, 10))
 
+    # 5. Urgent
     switch_urgent = ctk.CTkSwitch(frame, text="Mark as Urgent", font=FONT_MAIN)
     switch_urgent.pack(anchor="w", padx=15, pady=(0, 10))
 
+    # 6. Deadline
     ctk.CTkLabel(frame, text="Deadline", font=FONT_TITLE, text_color="#A0A0A0").pack(anchor="w", padx=15, pady=(0,5))
     date_frame = ctk.CTkFrame(frame, fg_color="transparent")
-    date_frame.pack(fill="x", padx=15, pady=(0, 20))
+    date_frame.pack(fill="x", padx=15, pady=(0, 15))
     ctk.CTkLabel(date_frame, textvariable=date_var, font=("SF Pro Display", 16), width=100, anchor="w").pack(side="left")
     ctk.CTkButton(date_frame, text="Select", width=80, 
                   command=lambda: open_calendar_picker(win, lambda d: date_var.set(d))).pack(side="right")
 
+    # Pre-fill data
     if is_edit and task_data:
         entry_title.insert(0, task_data['title'])
         combo_impact.set(task_data['impact'])
         combo_category.set(task_data.get('category', 'General'))
+        combo_status.set(task_data.get('status', 'Pending')) # Set Status
         if task_data.get('is_urgent', False): switch_urgent.select()
         date_var.set(task_data['deadline'])
 
@@ -386,10 +389,10 @@ tree.heading("status", text="Status", anchor="center")
 tree.heading("deadline", text="Deadline", anchor="center")
 
 tree.column("select", width=40, anchor="center", stretch=False)
-tree.column("title", width=400, anchor="w")
+tree.column("title", width=380, anchor="w")
 tree.column("category", width=120, anchor="w") 
 tree.column("priority", width=100, anchor="center")
-tree.column("status", width=90, anchor="center")
+tree.column("status", width=110, anchor="center")
 tree.column("deadline", width=100, anchor="center")
 
 scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=tree.yview)
@@ -402,6 +405,5 @@ tree.bind("<Double-1>", on_double_click)
 tree.tag_configure('oddrow', background='#2b2b2b')
 tree.tag_configure('evenrow', background='#333333') 
 
-# Start
 app.after(150, check_config_on_startup)
 app.mainloop()
