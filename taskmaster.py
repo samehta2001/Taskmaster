@@ -1,13 +1,14 @@
 import customtkinter as ctk 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from tinydb import TinyDB
+from tinydb import TinyDB, Query
 from tkcalendar import Calendar 
 import datetime
 import os
 import json
 import sys
 import platform
+import csv
 
 # --- 1. PATH CONFIGURATION ---
 APP_NAME = "TaskMaster"
@@ -42,8 +43,112 @@ checked_task_ids = set()
 filter_var = None  
 filter_menu = None 
 hide_completed_var = None 
+search_var = None
+CURRENT_DB_PATH = None
 
 # --- 3. HELPER FUNCTIONS ---
+
+def send_notification(title, message):
+    # macOS Native Notification
+    if platform.system() == "Darwin":
+        try:
+            # Escape double quotes in title and message to prevent shell syntax errors
+            safe_title = title.replace('"', '\\"')
+            safe_message = message.replace('"', '\\"')
+            os.system(f"""osascript -e 'display notification "{safe_message}" with title "{safe_title}"'""")
+        except:
+            pass
+    else:
+        # Placeholder for other OSs if needed later
+        print(f"Notification: {title} - {message}")
+
+def apply_tree_theme(mode):
+    style = ttk.Style()
+    style.theme_use("default")
+    
+    if mode == "Dark":
+        bg = "#2b2b2b"
+        fg = "white"
+        head_bg = "#1a1a1a"
+        head_fg = "white"
+        sel_bg = "#1f538d"
+        odd = "#2b2b2b"
+        even = "#333333"
+    else:
+        bg = "#ffffff"
+        fg = "black"
+        head_bg = "#e1e1e1"
+        head_fg = "black"
+        sel_bg = "#007AFF"
+        odd = "#ffffff"
+        even = "#f0f0f0"
+    
+    style.configure("Treeview", background=bg, foreground=fg, fieldbackground=bg, 
+                    borderwidth=0, rowheight=40, font=("SF Pro Display", 13))
+    
+    # Configure heading with explicit dark background for dark mode
+    style.configure("Treeview.Heading", 
+                    background=head_bg, 
+                    foreground=head_fg, 
+                    relief="flat",
+                    font=("SF Pro Display", 13, "bold"),
+                    borderwidth=0)
+    
+    # Map states to ensure dark header stays dark
+    style.map("Treeview.Heading", 
+              background=[('active', head_bg), ('!active', head_bg)],
+              foreground=[('active', head_fg), ('!active', head_fg)])
+    
+    style.map("Treeview", background=[('selected', sel_bg)], foreground=[('selected', 'white')])
+    
+    # Try updating tags if tree exists
+    try:
+        tree.tag_configure('oddrow', background=odd)
+        tree.tag_configure('evenrow', background=even)
+    except:
+        pass
+
+def toggle_theme():
+    current_mode = ctk.get_appearance_mode()
+    new_mode = "Light" if current_mode == "Dark" else "Dark"
+    ctk.set_appearance_mode(new_mode)
+    apply_tree_theme(new_mode)
+
+def export_to_csv():
+    if tasks_table is None: return
+    
+    file_path = filedialog.asksaveasfilename(
+        title="Export Tasks to CSV",
+        defaultextension=".csv",
+        filetypes=[("CSV Files", "*.csv")],
+        initialfile=f"tasks_export_{datetime.date.today()}.csv",
+        parent=app
+    )
+    
+    if file_path:
+        try:
+            all_tasks = tasks_table.all()
+            with open(file_path, mode='w', newline='', encoding='utf-8') as file:
+                writer = csv.writer(file)
+                # Header
+                writer.writerow(["ID", "Title", "Category", "Priority", "Status", "Deadline", "Impact", "Urgent", "Notes", "Created At"])
+                # Rows
+                for task in all_tasks:
+                    writer.writerow([
+                        task.doc_id,
+                        task.get('title', ''),
+                        task.get('category', ''),
+                        task.get('priority', ''),
+                        task.get('status', ''),
+                        task.get('deadline', ''),
+                        task.get('impact', ''),
+                        task.get('is_urgent', ''),
+                        task.get('notes', ''),
+                        task.get('created_at', '')
+                    ])
+            messagebox.showinfo("Success", "Tasks exported successfully!")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export: {e}")
 
 def center_window_to_parent(window, width, height):
     app.update_idletasks()
@@ -137,7 +242,16 @@ class PomodoroWindow(ctk.CTkToplevel):
             self.running = False
             self.lbl_timer.configure(text="00:00")
             self.btn_start.configure(text="Start", fg_color="#34C759")
-            tk.messagebox.showinfo("Timer", f"{self.mode} finished!", parent=self)
+            
+            msg = f"{self.mode} session finished!"
+            send_notification("TaskMaster Focus", msg)
+            
+            # Bring window to front
+            self.deiconify()
+            self.lift()
+            self.attributes("-topmost", True)
+            
+            tk.messagebox.showinfo("Timer", msg, parent=self)
 
     def reset_timer(self):
         self.running = False
@@ -168,16 +282,80 @@ class PomodoroWindow(ctk.CTkToplevel):
 
 def open_pomodoro():
     PomodoroWindow(app)
+    
+def open_settings():
+    set_win = ctk.CTkToplevel(app)
+    set_win.title("Settings")
+    center_window_to_parent(set_win, 500, 350)
+    set_win.grab_set()
+    set_win.attributes("-topmost", True)
+    
+    ctk.CTkLabel(set_win, text="Settings", font=FONT_HEADER).pack(pady=(20, 10))
+    
+    # Database Path
+    ctk.CTkLabel(set_win, text="Database Path:", font=FONT_TITLE).pack(pady=(10, 0))
+    
+    path_frame = ctk.CTkFrame(set_win, fg_color="transparent")
+    path_frame.pack(pady=5, padx=20, fill="x")
+    
+    entry_path = ctk.CTkEntry(path_frame, font=FONT_MAIN)
+    if CURRENT_DB_PATH:
+        entry_path.insert(0, CURRENT_DB_PATH)
+    else:
+        entry_path.insert(0, "Not Loaded")
+    entry_path.configure(state="readonly")
+    entry_path.pack(side="left", fill="x", expand=True, padx=(0, 10))
+    
+    def change_db():
+        new_path = filedialog.asksaveasfilename(
+            title="Select or Create Database File",
+            defaultextension=".json",
+            filetypes=[("JSON Files", "*.json")],
+            initialfile="my_tasks.json",
+            parent=set_win
+        )
+        if new_path:
+            save_config_and_start(new_path)
+            entry_path.configure(state="normal")
+            entry_path.delete(0, "end")
+            entry_path.insert(0, new_path)
+            entry_path.configure(state="readonly")
+            messagebox.showinfo("Success", "Database switched successfully!", parent=set_win)
+    
+    btn_change = ctk.CTkButton(path_frame, text="Change", width=80, command=change_db)
+    btn_change.pack(side="right")
+    
+    # Theme Toggle
+    ctk.CTkLabel(set_win, text="Appearance:", font=FONT_TITLE).pack(pady=(20, 0))
+    btn_theme = ctk.CTkButton(set_win, text="Toggle Light/Dark Mode", command=toggle_theme, 
+                              fg_color="#555555", hover_color="#666666", font=FONT_BOLD)
+    btn_theme.pack(pady=10)
+    
+    ctk.CTkButton(set_win, text="Close", command=set_win.destroy, fg_color="#FF3B30", hover_color="#d32f2f").pack(pady=(20, 0))
 
 # --- 5. DATABASE & SETUP ---
 
+def check_deadlines():
+    if tasks_table is None: return
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    Task = Query()
+    due_tasks = tasks_table.search(Task.deadline == today)
+    due_tasks = [t for t in due_tasks if t.get('status') != 'Completed']
+    
+    if due_tasks:
+        count = len(due_tasks)
+        send_notification("TaskMaster", f"You have {count} task(s) due today!")
+
 def initialize_db(path):
-    global db, tasks_table
+    global db, tasks_table, CURRENT_DB_PATH
     try:
         db = TinyDB(path)
         tasks_table = db.table('tasks')
+        CURRENT_DB_PATH = path
         refresh_task_list()
         update_filter_options()
+        # Check for deadlines slightly after startup
+        app.after(2000, check_deadlines)
     except Exception as e:
         messagebox.showerror("Error", f"Could not load database: {e}")
 
@@ -258,6 +436,11 @@ def refresh_task_list(event=None):
     # 2. Hide Completed Filter
     if hide_completed_var.get(): 
         all_tasks = [t for t in all_tasks if t.get('status') != 'Completed']
+
+    # 3. Search Filter
+    search_txt = search_var.get().lower()
+    if search_txt:
+        all_tasks = [t for t in all_tasks if search_txt in t['title'].lower()]
 
     # Sort Logic
     priority_order = {"Critical": 0, "Important": 1, "Planned": 2, "Review": 3, "Delegate": 4, "Trivial": 5}
@@ -340,7 +523,7 @@ def open_task_window(task_id=None, task_data=None):
     is_edit = task_id is not None
     win = ctk.CTkToplevel(app)
     win.title("Edit Task" if is_edit else "Add New Task")
-    center_window_to_parent(win, 420, 580) 
+    center_window_to_parent(win, 420, 650) 
     win.grab_set() 
     win.attributes("-topmost", True)
     
@@ -353,6 +536,7 @@ def open_task_window(task_id=None, task_data=None):
         is_urgent = switch_urgent.get() == 1
         deadline = date_var.get()
         status = combo_status.get() 
+        notes = txt_notes.get("1.0", "end-1c")
 
         if not title: return
         if not category.strip(): category = "General"
@@ -362,6 +546,7 @@ def open_task_window(task_id=None, task_data=None):
             'title': title, 'impact': impact, 'category': category, 
             'is_urgent': is_urgent, 'priority': calculated_priority, 'deadline': deadline,
             'status': status,
+            'notes': notes,
             'created_at': datetime.datetime.now().strftime("%Y-%m-%d") if not is_edit else task_data['created_at']
         }
 
@@ -382,7 +567,12 @@ def open_task_window(task_id=None, task_data=None):
     entry_title = ctk.CTkEntry(frame, placeholder_text="Details...", font=FONT_MAIN, height=35)
     entry_title.pack(fill="x", padx=15, pady=(0, 10))
 
-    # 2. Category
+    # 2. Notes
+    ctk.CTkLabel(frame, text="Notes", font=FONT_TITLE, text_color="#A0A0A0").pack(anchor="w", padx=15, pady=(0,5))
+    txt_notes = ctk.CTkTextbox(frame, font=FONT_MAIN, height=80)
+    txt_notes.pack(fill="x", padx=15, pady=(0, 10))
+
+    # 3. Category
     ctk.CTkLabel(frame, text="Category", font=FONT_TITLE, text_color="#A0A0A0").pack(anchor="w", padx=15, pady=(0,5))
     existing_cats = get_all_categories()
     if "All Categories" in existing_cats: existing_cats.remove("All Categories")
@@ -393,23 +583,23 @@ def open_task_window(task_id=None, task_data=None):
     combo_category.set("General") 
     combo_category.pack(fill="x", padx=15, pady=(0, 10))
 
-    # 3. Status
+    # 4. Status
     ctk.CTkLabel(frame, text="Status", font=FONT_TITLE, text_color="#A0A0A0").pack(anchor="w", padx=15, pady=(0,5))
     combo_status = ctk.CTkComboBox(frame, values=["Pending", "In Progress", "Completed", "On Hold"], state="readonly", font=FONT_MAIN, height=35)
     combo_status.set("Pending")
     combo_status.pack(fill="x", padx=15, pady=(0, 10))
 
-    # 4. Impact
+    # 5. Impact
     ctk.CTkLabel(frame, text="Impact", font=FONT_TITLE, text_color="#A0A0A0").pack(anchor="w", padx=15, pady=(0,5))
     combo_impact = ctk.CTkComboBox(frame, values=["High", "Medium", "Low"], state="readonly", font=FONT_MAIN, height=35)
     combo_impact.set("High")
     combo_impact.pack(fill="x", padx=15, pady=(0, 10))
 
-    # 5. Urgent
+    # 6. Urgent
     switch_urgent = ctk.CTkSwitch(frame, text="Mark as Urgent", font=FONT_MAIN)
     switch_urgent.pack(anchor="w", padx=15, pady=(0, 10))
 
-    # 6. Deadline
+    # 7. Deadline
     ctk.CTkLabel(frame, text="Deadline", font=FONT_TITLE, text_color="#A0A0A0").pack(anchor="w", padx=15, pady=(0,5))
     date_frame = ctk.CTkFrame(frame, fg_color="transparent")
     date_frame.pack(fill="x", padx=15, pady=(0, 15))
@@ -419,6 +609,8 @@ def open_task_window(task_id=None, task_data=None):
 
     if is_edit and task_data:
         entry_title.insert(0, task_data['title'])
+        if task_data.get('notes'):
+            txt_notes.insert("1.0", task_data['notes'])
         combo_impact.set(task_data['impact'])
         combo_category.set(task_data.get('category', 'General'))
         combo_status.set(task_data.get('status', 'Pending'))
@@ -438,50 +630,76 @@ def on_double_click(event):
 # --- 8. MAIN APP RENDER ---
 app = ctk.CTk()
 app.title("TaskMaster")
-app.geometry("950x650") 
+app.geometry("1000x700") 
+
+# Initialize Global UI Vars
+search_var = tk.StringVar()
+filter_var = tk.StringVar(value="All Categories")
+hide_completed_var = ctk.BooleanVar(value=True)
 
 # Header
-header_frame = ctk.CTkFrame(app, height=70, corner_radius=0, fg_color="transparent")
-header_frame.pack(fill="x", padx=30, pady=(30, 20))
+header_frame = ctk.CTkFrame(app, height=100, corner_radius=0, fg_color="transparent")
+header_frame.pack(fill="x", padx=30, pady=(20, 10))
 
+# Top Row: Title | Theme | Focus
 top_row = ctk.CTkFrame(header_frame, fg_color="transparent")
-top_row.pack(fill="x")
+top_row.pack(fill="x", pady=(0, 15))
+
 ctk.CTkLabel(top_row, text="Tasks", font=FONT_HEADER).pack(side="left")
+
+btn_settings = ctk.CTkButton(top_row, text="⚙️", width=40, height=32, 
+                          command=open_settings, fg_color="transparent", hover_color="#444444", 
+                          font=("SF Pro Display", 20), text_color="#FFFFFF")
+btn_settings.pack(side="right", padx=(5, 0))
 
 btn_focus = ctk.CTkButton(top_row, text="Focus Mode 🍅", width=120, height=32, 
                           command=open_pomodoro, fg_color="#34C759", hover_color="#28a745", font=FONT_BOLD)
-btn_focus.pack(side="right", padx=(0,0))
+btn_focus.pack(side="right")
 
+
+# Bottom Row: Search | Filter | Hide | Export | Del | Add
 bottom_row = ctk.CTkFrame(header_frame, fg_color="transparent")
-bottom_row.pack(fill="x", pady=(15,0))
+bottom_row.pack(fill="x")
 
-filter_var = tk.StringVar(value="All Categories")
+# Search
+entry_search = ctk.CTkEntry(bottom_row, textvariable=search_var, placeholder_text="Search tasks...", width=200, font=FONT_MAIN)
+entry_search.pack(side="left", padx=(0, 10))
+search_var.trace_add("write", lambda *args: refresh_task_list()) 
+
+# Filter
 filter_menu = ctk.CTkComboBox(
     bottom_row, 
     values=["All Categories"], 
     command=refresh_task_list, 
     variable=filter_var,
-    width=150,
+    width=140,
     font=FONT_MAIN
 )
 filter_menu.pack(side="left")
 
-hide_completed_var = ctk.BooleanVar(value=True) 
+# Hide Completed
 switch_hide = ctk.CTkSwitch(
     bottom_row, 
-    text="Hide Completed", 
+    text="Hide Done", 
     command=refresh_task_list, 
     variable=hide_completed_var,
     onvalue=True, offvalue=False,
     font=FONT_MAIN
 )
-switch_hide.pack(side="left", padx=20)
+switch_hide.pack(side="left", padx=15)
 
+# Buttons Right
 btn_frame = ctk.CTkFrame(bottom_row, fg_color="transparent")
 btn_frame.pack(side="right")
+
+btn_export = ctk.CTkButton(btn_frame, text="Export CSV", width=90, height=32, 
+                           command=export_to_csv, fg_color="#5856D6", hover_color="#4e4cb8", font=FONT_BOLD)
+btn_export.pack(side="left", padx=(0, 10))
+
 btn_del = ctk.CTkButton(btn_frame, text="-", width=40, height=40, corner_radius=10,
     font=FONT_ICON, fg_color="#FF3B30", hover_color="#D70015", command=delete_selected_tasks)
 btn_del.pack(side="left", padx=(0, 10))
+
 btn_add = ctk.CTkButton(btn_frame, text="+", width=40, height=40, corner_radius=10,
     font=FONT_ICON, fg_color="#007AFF", hover_color="#0062cc", command=lambda: open_task_window())
 btn_add.pack(side="left")
@@ -489,17 +707,7 @@ btn_add.pack(side="left")
 list_frame = ctk.CTkFrame(app, corner_radius=12)
 list_frame.pack(fill="both", expand=True, padx=30, pady=(0, 30))
 
-style = ttk.Style()
-style.theme_use("default")
-bg_color = "#2b2b2b"
-selected_color = "#1f538d"
-style.configure("Treeview", background=bg_color, foreground="white", fieldbackground=bg_color,
-                borderwidth=0, rowheight=40, font=("SF Pro Display", 13))
-style.configure("Treeview.Heading", background="#1a1a1a", foreground="white", relief="flat",
-                font=("SF Pro Display", 13, "bold"))
-style.map("Treeview", background=[('selected', selected_color)])
-style.layout("Treeview", [('Treeview.treearea', {'sticky': 'nswe'})])
-
+# Treeview setup
 columns = ("select", "title", "category", "priority", "status", "deadline")
 tree = ttk.Treeview(list_frame, columns=columns, show="headings", selectmode="browse")
 
@@ -524,8 +732,9 @@ scrollbar.pack(side="right", fill="y", pady=15, padx=(0,15))
 
 tree.bind("<Button-1>", toggle_check) 
 tree.bind("<Double-1>", on_double_click) 
-tree.tag_configure('oddrow', background='#2b2b2b')
-tree.tag_configure('evenrow', background='#333333') 
+
+# Apply initial theme (Dark by default per line 29)
+apply_tree_theme("Dark")
 
 app.after(150, check_config_on_startup)
 app.mainloop()
