@@ -55,6 +55,14 @@
 |:---:|:---:|
 | <img src="assets/screenshot_main.png" width="400" alt="Main View"> | <img src="assets/screenshot_focus.png" width="400" alt="Focus View"> |
 
+| Plan My Day | Category Goals |
+|:---:|:---:|
+| <img src="assets/screenshot_plan_my_day.png" width="400" alt="Plan My Day"> | <img src="assets/screenshot_goal.png" width="400" alt="Category Goals"> |
+
+| Settings |
+|:---:|
+| <img src="assets/screenshot_settings.png" width="400" alt="Settings"> |
+
 ---
 
 ## Installation
