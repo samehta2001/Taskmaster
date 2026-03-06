@@ -9,6 +9,11 @@ import json
 import sys
 import platform
 import csv
+import threading
+import anthropic
+from google import genai
+from google.genai import types as genai_types
+import ollama
 
 # --- 1. PATH CONFIGURATION ---
 APP_NAME = "TaskMaster"
@@ -45,6 +50,16 @@ filter_menu = None
 hide_completed_var = None 
 search_var = None
 CURRENT_DB_PATH = None
+_last_db_mtime = None
+DB_POLL_INTERVAL_MS = 30000  # 30 seconds
+ANTHROPIC_API_KEY = None
+GEMINI_API_KEY = None
+AI_PROVIDER = "Claude"  # "Claude", "Gemini", or "Ollama"
+OLLAMA_MODEL = "llama3.1:8b"
+WORKING_HOURS = "9:00 AM - 6:00 PM"
+PEAK_HOURS = "9:00 AM - 12:00 PM"
+WIND_DOWN_HOURS = "3:00 PM - 5:00 PM"
+goals_table = None
 
 # --- 3. HELPER FUNCTIONS ---
 
@@ -172,6 +187,13 @@ def get_all_categories():
     sorted_cats = sorted(list(cats))
     return ["All Categories"] + sorted_cats
 
+def _get_ollama_models():
+    try:
+        response = ollama.list()
+        return [m.model for m in response.models] if response.models else []
+    except Exception:
+        return []
+
 # --- 4. POMODORO LOGIC (UPDATED: CENTERED) ---
 
 class PomodoroWindow(ctk.CTkToplevel):
@@ -284,20 +306,24 @@ def open_pomodoro():
     PomodoroWindow(app)
     
 def open_settings():
+    global ANTHROPIC_API_KEY, GEMINI_API_KEY, AI_PROVIDER, OLLAMA_MODEL
     set_win = ctk.CTkToplevel(app)
     set_win.title("Settings")
-    center_window_to_parent(set_win, 500, 350)
+    center_window_to_parent(set_win, 500, 700)
     set_win.grab_set()
     set_win.attributes("-topmost", True)
-    
-    ctk.CTkLabel(set_win, text="Settings", font=FONT_HEADER).pack(pady=(20, 10))
-    
+
+    scrollable = ctk.CTkScrollableFrame(set_win)
+    scrollable.pack(fill="both", expand=True, padx=0, pady=0)
+
+    ctk.CTkLabel(scrollable, text="Settings", font=FONT_HEADER).pack(pady=(20, 10))
+
     # Database Path
-    ctk.CTkLabel(set_win, text="Database Path:", font=FONT_TITLE).pack(pady=(10, 0))
-    
-    path_frame = ctk.CTkFrame(set_win, fg_color="transparent")
+    ctk.CTkLabel(scrollable, text="Database Path:", font=FONT_TITLE).pack(pady=(10, 0))
+
+    path_frame = ctk.CTkFrame(scrollable, fg_color="transparent")
     path_frame.pack(pady=5, padx=20, fill="x")
-    
+
     entry_path = ctk.CTkEntry(path_frame, font=FONT_MAIN)
     if CURRENT_DB_PATH:
         entry_path.insert(0, CURRENT_DB_PATH)
@@ -305,7 +331,7 @@ def open_settings():
         entry_path.insert(0, "Not Loaded")
     entry_path.configure(state="readonly")
     entry_path.pack(side="left", fill="x", expand=True, padx=(0, 10))
-    
+
     def change_db():
         new_path = filedialog.asksaveasfilename(
             title="Select or Create Database File",
@@ -321,17 +347,142 @@ def open_settings():
             entry_path.insert(0, new_path)
             entry_path.configure(state="readonly")
             messagebox.showinfo("Success", "Database switched successfully!", parent=set_win)
-    
+
     btn_change = ctk.CTkButton(path_frame, text="Change", width=80, command=change_db)
     btn_change.pack(side="right")
-    
+
+    # AI Provider Selector
+    ctk.CTkLabel(scrollable, text="AI Provider:", font=FONT_TITLE).pack(pady=(15, 0))
+
+    def on_provider_change(value):
+        global AI_PROVIDER
+        AI_PROVIDER = value
+        _save_all_settings()
+
+    provider_seg = ctk.CTkSegmentedButton(scrollable, values=["Claude", "Gemini", "Ollama"],
+                                           command=on_provider_change, font=FONT_BOLD)
+    provider_seg.set(AI_PROVIDER)
+    provider_seg.pack(pady=5, padx=20)
+
+    # Anthropic API Key
+    ctk.CTkLabel(scrollable, text="Anthropic API Key:", font=FONT_TITLE).pack(pady=(15, 0))
+
+    api_frame = ctk.CTkFrame(scrollable, fg_color="transparent")
+    api_frame.pack(pady=5, padx=20, fill="x")
+
+    entry_api = ctk.CTkEntry(api_frame, font=FONT_MAIN, show="*", placeholder_text="sk-ant-...")
+    if ANTHROPIC_API_KEY:
+        entry_api.insert(0, ANTHROPIC_API_KEY)
+    entry_api.pack(side="left", fill="x", expand=True, padx=(0, 10))
+
+    def save_anthropic_key():
+        global ANTHROPIC_API_KEY
+        key = entry_api.get().strip()
+        ANTHROPIC_API_KEY = key if key else None
+        _save_all_settings()
+        messagebox.showinfo("Success", "Anthropic API key saved!", parent=set_win)
+
+    ctk.CTkButton(api_frame, text="Save Key", width=80, command=save_anthropic_key,
+                   fg_color="#5856D6", hover_color="#4e4cb8").pack(side="right")
+
+    # Gemini API Key
+    ctk.CTkLabel(scrollable, text="Gemini API Key:", font=FONT_TITLE).pack(pady=(15, 0))
+
+    gemini_frame = ctk.CTkFrame(scrollable, fg_color="transparent")
+    gemini_frame.pack(pady=5, padx=20, fill="x")
+
+    entry_gemini = ctk.CTkEntry(gemini_frame, font=FONT_MAIN, show="*", placeholder_text="AIza...")
+    if GEMINI_API_KEY:
+        entry_gemini.insert(0, GEMINI_API_KEY)
+    entry_gemini.pack(side="left", fill="x", expand=True, padx=(0, 10))
+
+    def save_gemini_key():
+        global GEMINI_API_KEY
+        key = entry_gemini.get().strip()
+        GEMINI_API_KEY = key if key else None
+        _save_all_settings()
+        messagebox.showinfo("Success", "Gemini API key saved!", parent=set_win)
+
+    ctk.CTkButton(gemini_frame, text="Save Key", width=80, command=save_gemini_key,
+                   fg_color="#34A853", hover_color="#2d8f47").pack(side="right")
+
+    # Ollama Model Selector
+    ctk.CTkLabel(scrollable, text="Ollama Model:", font=FONT_TITLE).pack(pady=(15, 0))
+
+    ollama_frame = ctk.CTkFrame(scrollable, fg_color="transparent")
+    ollama_frame.pack(pady=5, padx=20, fill="x")
+
+    available_models = _get_ollama_models()
+    ollama_combo = ctk.CTkComboBox(ollama_frame, values=available_models, font=FONT_MAIN, height=35)
+    ollama_combo.set(OLLAMA_MODEL if OLLAMA_MODEL in available_models else (available_models[0] if available_models else ""))
+    ollama_combo.pack(side="left", fill="x", expand=True, padx=(0, 10))
+
+    def save_ollama_model():
+        global OLLAMA_MODEL
+        OLLAMA_MODEL = ollama_combo.get().strip()
+        _save_all_settings()
+        messagebox.showinfo("Success", f"Ollama model set to '{OLLAMA_MODEL}'.", parent=set_win)
+
+    ctk.CTkButton(ollama_frame, text="Save", width=80, command=save_ollama_model,
+                   fg_color="#FF9500", hover_color="#e08600").pack(side="right")
+
+    def refresh_ollama_list():
+        models = _get_ollama_models()
+        ollama_combo.configure(values=models)
+        if models:
+            ollama_combo.set(models[0])
+
+    ctk.CTkButton(scrollable, text="Refresh Ollama Models", command=refresh_ollama_list,
+                   fg_color="#FF9500", hover_color="#e08600", font=FONT_BOLD, width=180).pack(pady=(5, 0))
+
+    # Productivity Schedule
+    ctk.CTkLabel(scrollable, text="Productivity Schedule:", font=FONT_TITLE).pack(pady=(20, 0))
+
+    ctk.CTkLabel(scrollable, text="Your overall working window",
+                 font=FONT_MAIN, text_color="#A0A0A0").pack(pady=(5, 2))
+    work_frame = ctk.CTkFrame(scrollable, fg_color="transparent")
+    work_frame.pack(pady=5, padx=20, fill="x")
+    ctk.CTkLabel(work_frame, text="Working Hours:", font=FONT_MAIN, width=130, anchor="w").pack(side="left")
+    entry_work = ctk.CTkEntry(work_frame, font=FONT_MAIN, placeholder_text="e.g. 9:00 AM - 6:00 PM")
+    entry_work.insert(0, WORKING_HOURS)
+    entry_work.pack(side="left", fill="x", expand=True)
+
+    ctk.CTkLabel(scrollable, text="High-focus blocks (comma-separate multiple)",
+                 font=FONT_MAIN, text_color="#A0A0A0").pack(pady=(5, 2))
+    peak_frame = ctk.CTkFrame(scrollable, fg_color="transparent")
+    peak_frame.pack(pady=5, padx=20, fill="x")
+    ctk.CTkLabel(peak_frame, text="Peak Hours:", font=FONT_MAIN, width=130, anchor="w").pack(side="left")
+    entry_peak = ctk.CTkEntry(peak_frame, font=FONT_MAIN, placeholder_text="e.g. 9 AM - 11 AM, 2 PM - 3 PM")
+    entry_peak.insert(0, PEAK_HOURS)
+    entry_peak.pack(side="left", fill="x", expand=True)
+
+    ctk.CTkLabel(scrollable, text="Lower energy periods for lighter tasks",
+                 font=FONT_MAIN, text_color="#A0A0A0").pack(pady=(5, 2))
+    wind_frame = ctk.CTkFrame(scrollable, fg_color="transparent")
+    wind_frame.pack(pady=5, padx=20, fill="x")
+    ctk.CTkLabel(wind_frame, text="Wind-Down Hours:", font=FONT_MAIN, width=130, anchor="w").pack(side="left")
+    entry_wind = ctk.CTkEntry(wind_frame, font=FONT_MAIN, placeholder_text="e.g. 3:00 PM - 5:00 PM")
+    entry_wind.insert(0, WIND_DOWN_HOURS)
+    entry_wind.pack(side="left", fill="x", expand=True)
+
+    def save_schedule():
+        global WORKING_HOURS, PEAK_HOURS, WIND_DOWN_HOURS
+        WORKING_HOURS = entry_work.get().strip() or "9:00 AM - 6:00 PM"
+        PEAK_HOURS = entry_peak.get().strip() or "9:00 AM - 12:00 PM"
+        WIND_DOWN_HOURS = entry_wind.get().strip() or "3:00 PM - 5:00 PM"
+        _save_all_settings()
+        messagebox.showinfo("Success", "Productivity schedule saved!", parent=set_win)
+
+    ctk.CTkButton(scrollable, text="Save Schedule", command=save_schedule,
+                   fg_color="#007AFF", hover_color="#0062cc", font=FONT_BOLD, width=150).pack(pady=(5, 0))
+
     # Theme Toggle
-    ctk.CTkLabel(set_win, text="Appearance:", font=FONT_TITLE).pack(pady=(20, 0))
-    btn_theme = ctk.CTkButton(set_win, text="Toggle Light/Dark Mode", command=toggle_theme, 
+    ctk.CTkLabel(scrollable, text="Appearance:", font=FONT_TITLE).pack(pady=(20, 0))
+    btn_theme = ctk.CTkButton(scrollable, text="Toggle Light/Dark Mode", command=toggle_theme,
                               fg_color="#555555", hover_color="#666666", font=FONT_BOLD)
     btn_theme.pack(pady=10)
-    
-    ctk.CTkButton(set_win, text="Close", command=set_win.destroy, fg_color="#FF3B30", hover_color="#d32f2f").pack(pady=(20, 0))
+
+    ctk.CTkButton(scrollable, text="Close", command=set_win.destroy, fg_color="#FF3B30", hover_color="#d32f2f").pack(pady=(20, 20))
 
 # --- 5. DATABASE & SETUP ---
 
@@ -347,21 +498,102 @@ def check_deadlines():
         send_notification("TaskMaster", f"You have {count} task(s) due today!")
 
 def initialize_db(path):
-    global db, tasks_table, CURRENT_DB_PATH
+    global db, tasks_table, goals_table, CURRENT_DB_PATH, _last_db_mtime
     try:
+        if db is not None:
+            db.close()
         db = TinyDB(path)
         tasks_table = db.table('tasks')
+        goals_table = db.table('category_goals')
         CURRENT_DB_PATH = path
+        _last_db_mtime = _get_db_mtime()
         refresh_task_list()
         update_filter_options()
-        # Check for deadlines slightly after startup
         app.after(2000, check_deadlines)
+        _start_db_poll()
     except Exception as e:
         messagebox.showerror("Error", f"Could not load database: {e}")
 
-def save_config_and_start(path):
+def _get_db_mtime():
+    try:
+        return os.path.getmtime(CURRENT_DB_PATH) if CURRENT_DB_PATH else None
+    except OSError:
+        return None
+
+_db_poll_id = None
+
+def _start_db_poll():
+    global _db_poll_id
+    if _db_poll_id is not None:
+        app.after_cancel(_db_poll_id)
+    _db_poll_id = app.after(DB_POLL_INTERVAL_MS, _poll_db_for_changes)
+
+def _poll_db_for_changes():
+    global _last_db_mtime, db, tasks_table, goals_table, _db_poll_id
+    if CURRENT_DB_PATH is None:
+        _db_poll_id = app.after(DB_POLL_INTERVAL_MS, _poll_db_for_changes)
+        return
+    current_mtime = _get_db_mtime()
+    if current_mtime is not None and current_mtime != _last_db_mtime:
+        _last_db_mtime = current_mtime
+        try:
+            if db is not None:
+                db.close()
+            db = TinyDB(CURRENT_DB_PATH)
+            tasks_table = db.table('tasks')
+            goals_table = db.table('category_goals')
+            refresh_task_list()
+            update_filter_options()
+        except Exception:
+            pass
+    _db_poll_id = app.after(DB_POLL_INTERVAL_MS, _poll_db_for_changes)
+
+def _save_all_settings():
+    config = {}
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+        except:
+            pass
+    config.pop('api_key', None)
+    if ANTHROPIC_API_KEY:
+        config['anthropic_api_key'] = ANTHROPIC_API_KEY
+    else:
+        config.pop('anthropic_api_key', None)
+    if GEMINI_API_KEY:
+        config['gemini_api_key'] = GEMINI_API_KEY
+    else:
+        config.pop('gemini_api_key', None)
+    config['ai_provider'] = AI_PROVIDER
+    config['ollama_model'] = OLLAMA_MODEL
+    config['working_hours'] = WORKING_HOURS
+    config['peak_hours'] = PEAK_HOURS
+    config['wind_down_hours'] = WIND_DOWN_HOURS
     with open(CONFIG_FILE, 'w') as f:
-        json.dump({'db_path': path}, f)
+        json.dump(config, f)
+
+def save_config_and_start(path):
+    config = {}
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+        except:
+            pass
+    config['db_path'] = path
+    config.pop('api_key', None)
+    if ANTHROPIC_API_KEY:
+        config['anthropic_api_key'] = ANTHROPIC_API_KEY
+    if GEMINI_API_KEY:
+        config['gemini_api_key'] = GEMINI_API_KEY
+    config['ai_provider'] = AI_PROVIDER
+    config['ollama_model'] = OLLAMA_MODEL
+    config['working_hours'] = WORKING_HOURS
+    config['peak_hours'] = PEAK_HOURS
+    config['wind_down_hours'] = WIND_DOWN_HOURS
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f)
     initialize_db(path)
 
 def open_setup_wizard():
@@ -398,16 +630,29 @@ def open_setup_wizard():
                   height=45, font=FONT_BOLD).pack(pady=10, padx=40, fill="x")
 
 def check_config_on_startup():
+    global ANTHROPIC_API_KEY, GEMINI_API_KEY, AI_PROVIDER, OLLAMA_MODEL
+    global WORKING_HOURS, PEAK_HOURS, WIND_DOWN_HOURS
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r') as f:
                 config = json.load(f)
                 path = config.get('db_path', '')
+                ANTHROPIC_API_KEY = config.get('anthropic_api_key', None)
+                GEMINI_API_KEY = config.get('gemini_api_key', None)
+                AI_PROVIDER = config.get('ai_provider', 'Claude')
+                OLLAMA_MODEL = config.get('ollama_model', 'llama3.1:8b')
+                WORKING_HOURS = config.get('working_hours', '9:00 AM - 6:00 PM')
+                PEAK_HOURS = config.get('peak_hours', '9:00 AM - 12:00 PM')
+                WIND_DOWN_HOURS = config.get('wind_down_hours', '3:00 PM - 5:00 PM')
+                # Backward compat: migrate old api_key
+                if not ANTHROPIC_API_KEY and config.get('api_key'):
+                    ANTHROPIC_API_KEY = config['api_key']
+                    _save_all_settings()
                 if path:
                     initialize_db(path)
                     return
         except:
-            pass 
+            pass
     open_setup_wizard()
 
 # --- 6. CORE UI LOGIC ---
@@ -499,6 +744,49 @@ def toggle_check(event):
         return "break" 
 
 # --- 7. POPUP WINDOWS ---
+
+def open_category_goal_window():
+    selected_cat = filter_var.get()
+    if selected_cat == "All Categories":
+        messagebox.showinfo("Select Category",
+                            "Please select a specific category from the filter dropdown first.",
+                            parent=app)
+        return
+    if goals_table is None:
+        return
+
+    goal_win = ctk.CTkToplevel(app)
+    goal_win.title(f"Goal — {selected_cat}")
+    center_window_to_parent(goal_win, 480, 320)
+    goal_win.grab_set()
+    goal_win.attributes("-topmost", True)
+
+    ctk.CTkLabel(goal_win, text=f"{selected_cat} — Long-Term Goal",
+                 font=FONT_HEADER).pack(pady=(20, 5))
+    ctk.CTkLabel(goal_win, text="Describe the overarching vision or objective for this category.",
+                 font=FONT_MAIN, text_color="#A0A0A0").pack(pady=(0, 10))
+
+    txt_goal = ctk.CTkTextbox(goal_win, font=FONT_MAIN, height=120, wrap="word")
+    txt_goal.pack(fill="x", padx=20, pady=(0, 10))
+
+    existing = goals_table.get(Query().category == selected_cat)
+    if existing and existing.get('goal', ''):
+        txt_goal.insert("1.0", existing['goal'])
+
+    def save_goal():
+        goal_text = txt_goal.get("1.0", "end-1c").strip()
+        if existing:
+            goals_table.update({'goal': goal_text}, Query().category == selected_cat)
+        else:
+            goals_table.insert({'category': selected_cat, 'goal': goal_text})
+        goal_win.destroy()
+
+    btn_frame = ctk.CTkFrame(goal_win, fg_color="transparent")
+    btn_frame.pack(fill="x", padx=20, pady=(0, 20))
+    ctk.CTkButton(btn_frame, text="Save", command=save_goal, height=40,
+                   font=FONT_BOLD, fg_color="#34C759", hover_color="#28a745").pack(side="left", expand=True, fill="x", padx=(0, 5))
+    ctk.CTkButton(btn_frame, text="Cancel", command=goal_win.destroy, height=40,
+                   font=FONT_BOLD, fg_color="#FF3B30", hover_color="#d32f2f").pack(side="right", expand=True, fill="x", padx=(5, 0))
 
 def open_calendar_picker(parent_window, set_date_callback):
     cal_win = ctk.CTkToplevel(parent_window)
@@ -627,7 +915,267 @@ def on_double_click(event):
     task_data = tasks_table.get(doc_id=doc_id)
     if task_data: open_task_window(task_id=doc_id, task_data=task_data)
 
-# --- 8. MAIN APP RENDER ---
+# --- 8. PLAN MY DAY (CLAUDE AI) ---
+
+PLAN_CHATS_DIR = os.path.join(USER_DATA_DIR, "plan_chats")
+if not os.path.exists(PLAN_CHATS_DIR):
+    os.makedirs(PLAN_CHATS_DIR)
+
+class PlanChatWindow(ctk.CTkToplevel):
+    def __init__(self, parent, system_prompt, messages):
+        super().__init__(parent)
+        self.title("Plan My Day")
+        width, height = 650, 600
+        center_window_to_parent(self, width, height)
+
+        self.system_prompt = system_prompt
+        self.messages = list(messages)
+        self.chat_file = os.path.join(
+            PLAN_CHATS_DIR,
+            f"plan_{datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')}.json"
+        )
+
+        ctk.CTkLabel(self, text="Plan My Day", font=FONT_HEADER).pack(pady=(15, 5))
+
+        self.chat_display = ctk.CTkTextbox(self, font=FONT_MAIN, wrap="word", state="disabled")
+        self.chat_display.pack(fill="both", expand=True, padx=15, pady=(0, 10))
+
+        input_frame = ctk.CTkFrame(self, fg_color="transparent")
+        input_frame.pack(fill="x", padx=15, pady=(0, 10))
+
+        self.entry = ctk.CTkEntry(input_frame, font=FONT_MAIN,
+                                   placeholder_text="e.g. Add a 1-hour lunch break at 12:30...")
+        self.entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self.entry.bind("<Return>", lambda e: self._send_message())
+
+        self.btn_send = ctk.CTkButton(input_frame, text="Send", width=80,
+                                       command=self._send_message, font=FONT_BOLD,
+                                       fg_color="#007AFF", hover_color="#0062cc")
+        self.btn_send.pack(side="right")
+
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=15, pady=(0, 15))
+        ctk.CTkButton(btn_frame, text="Close", command=self.destroy,
+                       fg_color="#FF3B30", hover_color="#d32f2f", font=FONT_BOLD,
+                       width=100).pack(side="right")
+
+        for msg in self.messages:
+            self._append_to_display(msg["role"], msg["content"])
+
+        self._save_chat()
+
+    def _append_to_display(self, role, content):
+        self.chat_display.configure(state="normal")
+        if self.chat_display.get("1.0", "end-1c"):
+            self.chat_display.insert("end", "\n\n")
+        label = "You" if role == "user" else "Planner"
+        self.chat_display.insert("end", f"--- {label} ---\n")
+        self.chat_display.insert("end", content)
+        self.chat_display.configure(state="disabled")
+        self.chat_display.see("end")
+
+    def _send_message(self):
+        user_text = self.entry.get().strip()
+        if not user_text:
+            return
+        self.entry.delete(0, "end")
+        self.messages.append({"role": "user", "content": user_text})
+        self._append_to_display("user", user_text)
+
+        self.btn_send.configure(state="disabled", text="...")
+        self.entry.configure(state="disabled")
+
+        def call_api():
+            try:
+                response_text = _call_ai(self.system_prompt, self.messages)
+                self.after(0, lambda: self._on_response(response_text))
+            except Exception as e:
+                self.after(0, lambda: self._on_error(str(e)))
+
+        threading.Thread(target=call_api, daemon=True).start()
+
+    def _on_response(self, response_text):
+        self.messages.append({"role": "assistant", "content": response_text})
+        self._append_to_display("assistant", response_text)
+        self.btn_send.configure(state="normal", text="Send")
+        self.entry.configure(state="normal")
+        self.entry.focus()
+        self._save_chat()
+
+    def _on_error(self, error_msg):
+        self.messages.pop()
+        self._append_to_display("assistant", f"[Error: {error_msg}]")
+        self.btn_send.configure(state="normal", text="Send")
+        self.entry.configure(state="normal")
+
+    def _save_chat(self):
+        data = {
+            "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "provider": AI_PROVIDER,
+            "model": OLLAMA_MODEL if AI_PROVIDER == "Ollama" else AI_PROVIDER,
+            "messages": self.messages,
+        }
+        try:
+            with open(self.chat_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+def _call_claude(system_prompt, messages):
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=2048,
+        system=system_prompt,
+        messages=messages,
+    )
+    return response.content[0].text
+
+def _call_gemini(system_prompt, messages):
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    contents = []
+    for msg in messages:
+        role = "user" if msg["role"] == "user" else "model"
+        contents.append(genai_types.Content(role=role, parts=[genai_types.Part(text=msg["content"])]))
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=contents,
+        config=genai_types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=2048,
+        ),
+    )
+    return response.text
+
+def _call_ollama(system_prompt, messages):
+    ollama_messages = [{"role": "system", "content": system_prompt}] + messages
+    response = ollama.chat(
+        model=OLLAMA_MODEL,
+        messages=ollama_messages,
+    )
+    return response["message"]["content"]
+
+def _call_ai(system_prompt, messages):
+    if AI_PROVIDER == "Ollama":
+        return _call_ollama(system_prompt, messages)
+    elif AI_PROVIDER == "Gemini":
+        return _call_gemini(system_prompt, messages)
+    else:
+        return _call_claude(system_prompt, messages)
+
+def plan_my_day():
+    if AI_PROVIDER == "Claude" and not ANTHROPIC_API_KEY:
+        messagebox.showwarning("API Key Missing",
+                               "Please set your Anthropic API key in Settings first.",
+                               parent=app)
+        return
+    if AI_PROVIDER == "Gemini" and not GEMINI_API_KEY:
+        messagebox.showwarning("API Key Missing",
+                               "Please set your Gemini API key in Settings first.",
+                               parent=app)
+        return
+    if AI_PROVIDER == "Ollama" and not OLLAMA_MODEL:
+        messagebox.showwarning("No Model",
+                               "Please select an Ollama model in Settings first.",
+                               parent=app)
+        return
+
+    if tasks_table is None:
+        messagebox.showwarning("No Database", "Please set up a database first.",
+                               parent=app)
+        return
+
+    all_tasks = tasks_table.all()
+    incomplete = [t for t in all_tasks if t.get('status') != 'Completed']
+
+    if not incomplete:
+        messagebox.showinfo("No Tasks", "You have no incomplete tasks to plan around.",
+                            parent=app)
+        return
+
+    # Build task list text
+    task_lines = []
+    for t in incomplete:
+        line = (f"- {t['title']} | Priority: {t['priority']} | Status: {t.get('status', 'Pending')} "
+                f"| Category: {t.get('category', 'General')} | Deadline: {t['deadline']}")
+        if t.get('notes', '').strip():
+            line += f" | Notes: {t['notes'].strip()}"
+        task_lines.append(line)
+    task_text = "\n".join(task_lines)
+
+    today = datetime.datetime.now().strftime("%A, %B %d, %Y")
+
+    # Collect per-category goals for categories present in incomplete tasks
+    goals_section = ""
+    if goals_table is not None:
+        categories_in_play = set(t.get('category', 'General') for t in incomplete)
+        goal_lines = []
+        for cat in sorted(categories_in_play):
+            goal_doc = goals_table.get(Query().category == cat)
+            if goal_doc and goal_doc.get('goal', '').strip():
+                goal_lines.append(f"- {cat}: {goal_doc['goal']}")
+        if goal_lines:
+            goals_section = "\n\nLong-term goals by category:\n" + "\n".join(goal_lines)
+
+    system_prompt = (
+        "You are a productivity planner. The user will give you their current task list. "
+        "Create a practical, time-blocked daily plan for today. Prioritize by deadline and priority level.\n\n"
+        "STRICT RULES:\n"
+        "1. NEVER schedule any task outside the user's Working Hours. This is a hard constraint.\n"
+        "2. Schedule demanding, high-priority tasks during the user's Peak Hours.\n"
+        "3. Reserve lighter tasks, reviews, and admin work for Wind-Down Hours.\n"
+        "4. Align daily task prioritization with the user's long-term goals for each category.\n"
+        "5. Do NOT assume breaks; only include breaks if the user requests them.\n"
+        "6. Reference actual task titles in your plan.\n\n"
+        "Format the plan as follows:\n"
+        "- Start with a one-line summary of the day\n"
+        "- Use time blocks in the format 'HH:MM AM - HH:MM AM/PM: Task Title'\n"
+        "- Group tasks under headers: MORNING, AFTERNOON, EVENING\n"
+        "- End with a 'KEY FOCUS AREAS' bullet list\n\n"
+        "When the user sends follow-up messages, revise the plan accordingly and output the full updated plan."
+    )
+    user_message = (
+        f"Today is {today}.\n\n"
+        f"My Working Hours: {WORKING_HOURS}\n"
+        f"My Peak Hours (high focus): {PEAK_HOURS}\n"
+        f"My Wind-Down Hours (lower energy): {WIND_DOWN_HOURS}\n\n"
+        f"Here are my current tasks:\n\n{task_text}"
+        f"{goals_section}\n\n"
+        "Please create a daily plan for me. "
+        f"IMPORTANT: All tasks MUST be scheduled between {WORKING_HOURS} only. "
+        "Do NOT schedule anything outside these working hours."
+    )
+
+    # Show loading window
+    loading_win = ctk.CTkToplevel(app)
+    loading_win.title("Planning...")
+    center_window_to_parent(loading_win, 300, 120)
+    provider_label = f"{AI_PROVIDER} ({OLLAMA_MODEL})" if AI_PROVIDER == "Ollama" else AI_PROVIDER
+    ctk.CTkLabel(loading_win, text=f"Generating plan via {provider_label}...", font=FONT_TITLE).pack(pady=(30, 5))
+    ctk.CTkLabel(loading_win, text="This may take a few seconds.", font=FONT_MAIN, text_color="#A0A0A0").pack()
+
+    initial_messages = [{"role": "user", "content": user_message}]
+
+    def call_api():
+        try:
+            plan_text = _call_ai(system_prompt, initial_messages)
+            app.after(0, lambda: on_success(plan_text))
+        except Exception as e:
+            err_msg = str(e)
+            app.after(0, lambda: on_error(err_msg))
+
+    def on_success(plan_text):
+        loading_win.destroy()
+        initial_messages.append({"role": "assistant", "content": plan_text})
+        PlanChatWindow(app, system_prompt, initial_messages)
+
+    def on_error(error_msg):
+        loading_win.destroy()
+        messagebox.showerror("Error", f"Failed to generate plan:\n{error_msg}", parent=app)
+
+    threading.Thread(target=call_api, daemon=True).start()
+
+# --- 9. MAIN APP RENDER ---
 app = ctk.CTk()
 app.title("TaskMaster")
 app.geometry("1000x700") 
@@ -652,9 +1200,13 @@ btn_settings = ctk.CTkButton(top_row, text="⚙️", width=40, height=32,
                           font=("SF Pro Display", 20), text_color="#FFFFFF")
 btn_settings.pack(side="right", padx=(5, 0))
 
-btn_focus = ctk.CTkButton(top_row, text="Focus Mode 🍅", width=120, height=32, 
+btn_focus = ctk.CTkButton(top_row, text="Focus Mode 🍅", width=120, height=32,
                           command=open_pomodoro, fg_color="#34C759", hover_color="#28a745", font=FONT_BOLD)
 btn_focus.pack(side="right")
+
+btn_plan = ctk.CTkButton(top_row, text="Plan My Day", width=120, height=32,
+                          command=plan_my_day, fg_color="#5856D6", hover_color="#4e4cb8", font=FONT_BOLD)
+btn_plan.pack(side="right", padx=(0, 10))
 
 
 # Bottom Row: Search | Filter | Hide | Export | Del | Add
@@ -676,6 +1228,10 @@ filter_menu = ctk.CTkComboBox(
     font=FONT_MAIN
 )
 filter_menu.pack(side="left")
+
+btn_goal = ctk.CTkButton(bottom_row, text="🎯 Goal", width=70, height=32,
+    command=open_category_goal_window, fg_color="#5856D6", hover_color="#4e4cb8", font=FONT_BOLD)
+btn_goal.pack(side="left", padx=(10, 0))
 
 # Hide Completed
 switch_hide = ctk.CTkSwitch(

@@ -36,7 +36,9 @@ def build_app():
         f'--add-data={ctk_path}:customtkinter',
         f'--add-data={cal_path}:tkcalendar',
         f'--add-data={babel_path}:babel',
-        f'--icon={ICON_ICNS}'
+        f'--icon={ICON_ICNS}',
+        '--hidden-import=google.genai',
+        '--hidden-import=ollama',
     ]
 
     print("🔨 Starting PyInstaller Build...")

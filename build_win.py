@@ -54,6 +54,7 @@ def build_app():
         f'--add-data={ctk_path}{sep}customtkinter',
         f'--add-data={cal_path}{sep}tkcalendar',
         f'--add-data={babel_path}{sep}babel',
+        '--hidden-import=google.genai',
     ]
 
     if has_icon:

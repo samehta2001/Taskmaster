@@ -1,0 +1,26 @@
+# Build artifacts
+build/
+dist/
+*.spec
+*.dmg
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+*.egg-info/
+
+# Personal data
+my_tasks.json
+todo_config.json
+plan_chats/
+
+# IDE
+.cursor/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
