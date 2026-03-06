@@ -68,14 +68,13 @@
 ## Installation
 
 ### For macOS Users
-1. Go to the [Releases](../../releases) page.
+1. Go to the [Latest Release](https://github.com/samehta2001/Taskmaster/releases/latest) page.
 2. Download `TaskMaster_Installer.dmg`.
-3. Drag the app to your **Applications** folder.
+3. Open the DMG and drag the app to your **Applications** folder.
 4. **Note:** Since this app is not signed by Apple, you may need to right-click the app and select **Open** the first time.
 
 ### For Windows Users
-1. Download `TaskMaster.exe` from Releases.
-2. Run the executable directly (no installation required).
+> Windows builds are coming soon. For now, run from source (see Development Setup below).
 
 ---
 
